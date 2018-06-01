@@ -825,8 +825,11 @@ network *parse_network_cfg(char *filename)
         }
         l.clip = net->clip;
         l.truth = option_find_int_quiet(options, "truth", 0);
+		// no error gradients from last layer
         l.onlyforward = option_find_int_quiet(options, "onlyforward", 0);
+		// stop error gradients from specific layer
         l.stopbackward = option_find_int_quiet(options, "stopbackward", 0);
+		l.noupdate = option_find_int_quiet(options, "noupdate", 0);
         l.dontsave = option_find_int_quiet(options, "dontsave", 0);
         l.dontload = option_find_int_quiet(options, "dontload", 0);
         l.dontloadscales = option_find_int_quiet(options, "dontloadscales", 0);

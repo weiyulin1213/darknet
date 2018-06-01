@@ -200,6 +200,7 @@ struct layer{
 
     int onlyforward;
     int stopbackward;
+    int noupdate;
     int dontload;
     int dontsave;
     int dontloadscales;
@@ -521,6 +522,7 @@ typedef struct detection{
     float *prob;
     float *mask;
     float objectness;
+	float dep;
     int sort_class;
 } detection;
 
@@ -578,7 +580,7 @@ typedef struct load_args{
 
 typedef struct{
     int id;
-    float x,y,w,h;
+    float x,y,w,h,dep;
     float left, right, top, bottom;
 } box_label;
 

@@ -1,4 +1,5 @@
 #include "darknet.h"
+#include "utils.h"
 
 static int coco_ids[] = {1,2,3,4,5,6,7,8,9,10,11,13,14,15,16,17,18,19,20,21,22,23,24,25,27,28,31,32,33,34,35,36,37,38,39,40,41,42,43,44,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,67,70,72,73,74,75,76,77,78,79,80,81,82,84,85,86,87,88,89,90};
 
@@ -53,7 +54,7 @@ void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, i
     args.d = &buffer;
     args.type = DETECTION_DATA;
     //args.type = INSTANCE_DATA;
-    args.threads = 64;
+    args.threads = 16;
 
     pthread_t load_thread = load_data(args);
     double time;
@@ -486,14 +487,17 @@ void validate_detector(char *datacfg, char *cfgfile, char *weightfile, char *out
     fprintf(stderr, "Total Detection Time: %f Seconds\n", what_time_is_it_now() - start);
 }
 
-void validate_detector_recall(char *cfgfile, char *weightfile)
+void validate_detector_recall(char *datacfg, char *cfgfile, char *weightfile)
 {
+	list *options=read_data_cfg(datacfg);
+	char *valid_images=option_find_str(options, "valid", "not_exist.txt");
+
     network *net = load_network(cfgfile, weightfile, 0);
     set_batch_network(net, 1);
     fprintf(stderr, "Learning Rate: %g, Momentum: %g, Decay: %g\n", net->learning_rate, net->momentum, net->decay);
     srand(time(0));
 
-    list *plist = get_paths("data/coco_val_5k.list");
+    list *plist = get_paths(valid_images);
     char **paths = (char **)list_to_array(plist);
 
     layer l = net->layers[net->n-1];
@@ -511,6 +515,20 @@ void validate_detector_recall(char *cfgfile, char *weightfile)
     int correct = 0;
     int proposals = 0;
     float avg_iou = 0;
+	float avg_depth_err=0;
+	float avg_depth_err_cap50=0;
+	float avg_depth_err_cap30=0;
+	float best_depth=0;
+	float depth_errors[100]={0};
+	float depth_errors_count[100]={0};
+	float error_dis[100]={0};
+	float threshs_nocap[3]={0};
+	float threshs_cap50[3]={0};
+	float threshs_cap30[3]={0};
+	float absrel=0, absrel_50=0, absrel_30=0;
+	float sqrel=0;
+	float overest[100]={0}, underest[100]={0};
+
 
     for(i = 0; i < m; ++i){
         char *path = paths[i];
@@ -527,6 +545,11 @@ void validate_detector_recall(char *cfgfile, char *weightfile)
         find_replace(labelpath, "JPEGImages", "labels", labelpath);
         find_replace(labelpath, ".jpg", ".txt", labelpath);
         find_replace(labelpath, ".JPEG", ".txt", labelpath);
+        //find_replace(labelpath, ".png", ".segtxtcoco", labelpath);
+		//find_replace(labelpath, ".png", ".seginstxtcoco", labelpath);
+        //find_replace(labelpath, ".png", ".segfixwhinstxtcoco", labelpath);
+        //find_replace(labelpath, ".png", ".segfixwhtxtcoco", labelpath);
+        find_replace(labelpath, ".png", ".txtcoco", labelpath);
 
         int num_labels = 0;
         box_label *truth = read_boxes(labelpath, &num_labels);
@@ -539,23 +562,77 @@ void validate_detector_recall(char *cfgfile, char *weightfile)
             ++total;
             box t = {truth[j].x, truth[j].y, truth[j].w, truth[j].h};
             float best_iou = 0;
-            for(k = 0; k < l.w*l.h*l.n; ++k){
+			float best_depth_err=0; 
+			float best_depth_err_cap50=0; 
+			float best_depth_err_cap30=0;
+			float err=0;
+            //for(k = 0; k < l.w*l.h*l.n; ++k){
+            for(k = 0; k < nboxes; ++k){
                 float iou = box_iou(dets[k].bbox, t);
                 if(dets[k].objectness > thresh && iou > best_iou){
                     best_iou = iou;
+					if(dets[k].dep<1)
+						best_depth=1;
+					else
+						best_depth=dets[k].dep;
+					err=best_depth-truth[j].dep;
+					best_depth_err=pow(best_depth-truth[j].dep, 2);
+					if(truth[j].dep>50) best_depth_err_cap50=pow((best_depth>50? 50:best_depth) - 50, 2);
+					else best_depth_err_cap50=best_depth_err;
+					if(truth[j].dep>30) best_depth_err_cap30=pow((best_depth>30? 30:best_depth) - 30, 2);
+					else best_depth_err_cap30=best_depth_err;
                 }
             }
             avg_iou += best_iou;
+			avg_depth_err+=best_depth_err;
+			avg_depth_err_cap50+=best_depth_err_cap50;
+			avg_depth_err_cap30+=best_depth_err_cap30;
+			// statistics
+			error_dis[(int)(sqrt(best_depth_err))]++;
+			depth_errors[((int)truth[j].dep)]+=best_depth_err;
+			depth_errors_count[((int)truth[j].dep)]++;
+			if(err<0) underest[((int)truth[j].dep)]++;
+			else overest[((int)truth[j].dep)]++;
+			float bigger_rel=truth[j].dep/best_depth>best_depth/truth[j].dep? truth[j].dep/best_depth: best_depth/truth[j].dep;
+			if(bigger_rel<1.25) threshs_nocap[0]++;
+			if(bigger_rel<1.5625) threshs_nocap[1]++;
+			if(bigger_rel<1.953125) threshs_nocap[2]++;
+			if(truth[j].dep > 50) {
+				threshs_cap50[0]++;threshs_cap50[1]++;threshs_cap50[2]++;
+			}
+			else{
+				if(bigger_rel<1.25) threshs_cap50[0]++;
+				if(bigger_rel<1.5125) threshs_cap50[1]++;
+				if(bigger_rel<1.953125) threshs_cap50[2]++;
+			}
+			if(truth[j].dep > 30) {
+				threshs_cap30[0]++;threshs_cap30[1]++;threshs_cap30[2]++;
+			}
+			else{
+				if(bigger_rel<1.25) threshs_cap30[0]++;
+				if(bigger_rel<1.5125) threshs_cap30[1]++;
+				if(bigger_rel<1.953125) threshs_cap30[2]++;
+			}
+			absrel+=(err>0?err:-err)/best_depth;
+			if(truth[j].dep<50) absrel_50+=(err>0?err:-err)/best_depth;
+			if(truth[j].dep<30) absrel_30+=(err>0?err:-err)/best_depth;
+			sqrel+=best_depth_err/best_depth;
+
             if(best_iou > iou_thresh){
                 ++correct;
             }
         }
 
-        fprintf(stderr, "%5d %5d %5d\tRPs/Img: %.2f\tIOU: %.2f%%\tRecall:%.2f%%\n", i, correct, total, (float)proposals/(i+1), avg_iou*100/total, 100.*correct/total);
+        fprintf(stderr, "%5d %5d %5d\tRPs/Img: %.2f\tIOU: %.2f%%\tRecall:%.2f%% Depth error:%.3f MSE, cap50:%.3f, cap30:%.3f\n", i, correct, total, (float)proposals/(i+1), avg_iou*100/total, 100.*correct/total, avg_depth_err/total, avg_depth_err_cap50/total, avg_depth_err_cap30/total);
         free(id);
         free_image(orig);
         free_image(sized);
     }
+	FILE *stats=fopen("results/depth_stats.csv","w");
+	for(i=0;i<100;i++) fprintf(stats ,"%d, %.3f, %.0f, %.0f, %.4f, %.4f\n", i, depth_errors[i]/depth_errors_count[i], depth_errors_count[i], error_dis[i], overest[i]/depth_errors_count[i], underest[i]/depth_errors_count[i]);
+	fclose(stats);
+	FILE *eval=fopen("results/evaluation.csv", "w");
+	fprintf(eval, "%f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f\n", sqrt(avg_depth_err/total), sqrt(avg_depth_err_cap50/total), sqrt(avg_depth_err_cap30/total), absrel/total, absrel_50/total, absrel_30/total, sqrel/total, threshs_nocap[0]/total, threshs_nocap[1]/total, threshs_nocap[2]/total, threshs_cap50[0]/total,threshs_cap50[1]/total, threshs_cap50[2]/total, threshs_cap30[0]/total, threshs_cap30[1]/total, threshs_cap30[2]/total);
 }
 
 
@@ -573,9 +650,18 @@ void test_detector(char *datacfg, char *cfgfile, char *weightfile, char *filenam
     char buff[256];
     char *input = buff;
     float nms=.45;
+	list *plist=NULL;
+	char **paths=NULL;
     while(1){
         if(filename){
-            strncpy(input, filename, 256);
+			if(strstr(filename, ".txt")==NULL)
+	            strncpy(input, filename, 256);
+			else{
+				printf("Read filenames from file: %s\n", filename);
+				plist = get_paths(filename);
+				paths = (char **)list_to_array(plist);
+				printf("Total images: %d\n", plist->size);
+			}
         } else {
             printf("Enter Image Path: ");
             fflush(stdout);
@@ -583,44 +669,66 @@ void test_detector(char *datacfg, char *cfgfile, char *weightfile, char *filenam
             if(!input) return;
             strtok(input, "\n");
         }
-        image im = load_image_color(input,0,0);
-        image sized = letterbox_image(im, net->w, net->h);
-        //image sized = resize_image(im, net->w, net->h);
-        //image sized2 = resize_max(im, net->w);
-        //image sized = crop_image(sized2, -((net->w - sized2.w)/2), -((net->h - sized2.h)/2), net->w, net->h);
-        //resize_network(net, sized.w, sized.h);
-        layer l = net->layers[net->n-1];
 
+		int processed=0;
+		image im, sized;
+		do{
+			if(plist){
+				im = load_image_color(paths[processed],0,0);
+				sized = letterbox_image(im, net->w, net->h);
+			}
+			else{
+				im = load_image_color(input,0,0);
+				sized = letterbox_image(im, net->w, net->h);
+			}
 
-        float *X = sized.data;
-        time=what_time_is_it_now();
-        network_predict(net, X);
-        printf("%s: Predicted in %f seconds.\n", input, what_time_is_it_now()-time);
-        int nboxes = 0;
-        detection *dets = get_network_boxes(net, im.w, im.h, thresh, hier_thresh, 0, 1, &nboxes);
-        //printf("%d\n", nboxes);
-        //if (nms) do_nms_obj(boxes, probs, l.w*l.h*l.n, l.classes, nms);
-        if (nms) do_nms_sort(dets, nboxes, l.classes, nms);
-        draw_detections(im, dets, nboxes, thresh, names, alphabet, l.classes);
-        free_detections(dets, nboxes);
-        if(outfile){
-            save_image(im, outfile);
-        }
-        else{
-            save_image(im, "predictions");
+			layer l = net->layers[net->n-1];
+
+			float *X = sized.data;
+			time=what_time_is_it_now();
+			network_predict(net, X);
+			if(plist)
+				printf("%s: Predicted in %f seconds.\n", paths[processed], what_time_is_it_now()-time);
+			else
+				printf("%s: Predicted in %f seconds.\n", input, what_time_is_it_now()-time);
+			int nboxes = 0;
+			detection *dets = get_network_boxes(net, im.w, im.h, thresh, hier_thresh, 0, 1, &nboxes);
+			//printf("Boxes: %d\n", nboxes);
+
+			//if (nms) do_nms_obj(boxes, probs, l.w*l.h*l.n, l.classes, nms);
+			if (nms) do_nms_sort(dets, nboxes, l.classes, nms);
+			
+			if(plist){
+				write_detections(paths[processed], dets, nboxes, thresh, names, l.classes);
+        		free_image(im);
+        		free_image(sized);
+			}
+			else{
+				draw_detections(im, dets, nboxes, thresh, names, alphabet, l.classes);
+			}
+			free_detections(dets, nboxes);
+			processed++;
+		}while(plist!=NULL && processed<plist->size);
+
+		if(!plist){
+			if(outfile){
+				save_image(im, outfile);
+			}
+			else{
+				save_image(im, "predictions");
 #ifdef OPENCV
-            cvNamedWindow("predictions", CV_WINDOW_NORMAL); 
-            if(fullscreen){
-                cvSetWindowProperty("predictions", CV_WND_PROP_FULLSCREEN, CV_WINDOW_FULLSCREEN);
-            }
-            show_image(im, "predictions");
-            cvWaitKey(0);
-            cvDestroyAllWindows();
+				cvNamedWindow("predictions", CV_WINDOW_NORMAL); 
+				if(fullscreen){
+					cvSetWindowProperty("predictions", CV_WND_PROP_FULLSCREEN, CV_WINDOW_FULLSCREEN);
+				}
+				show_image(im, "predictions");
+				cvWaitKey(0);
+				cvDestroyAllWindows();
 #endif
-        }
-
-        free_image(im);
-        free_image(sized);
+			}
+		}
+       	free_image(im);
+       	free_image(sized);
         if (filename) break;
     }
 }
@@ -842,7 +950,7 @@ void run_detector(int argc, char **argv)
     else if(0==strcmp(argv[2], "train")) train_detector(datacfg, cfg, weights, gpus, ngpus, clear);
     else if(0==strcmp(argv[2], "valid")) validate_detector(datacfg, cfg, weights, outfile);
     else if(0==strcmp(argv[2], "valid2")) validate_detector_flip(datacfg, cfg, weights, outfile);
-    else if(0==strcmp(argv[2], "recall")) validate_detector_recall(cfg, weights);
+    else if(0==strcmp(argv[2], "recall")) validate_detector_recall(datacfg, cfg, weights);
     else if(0==strcmp(argv[2], "demo")) {
         list *options = read_data_cfg(datacfg);
         int classes = option_find_int(options, "classes", 20);

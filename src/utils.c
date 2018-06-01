@@ -721,3 +721,80 @@ float **one_hot_encode(float *a, int n, int k)
     return t;
 }
 
+// self added function
+
+void reverse(char *str, int len){
+    int i=0, j=len-1, tmp;
+    while(i<j){
+        tmp=str[i];
+        str[i]=str[j];
+        str[j]=tmp;
+        i++; j--;
+	}
+}
+int int2str(int x, char *str, int d){
+    int i=0;
+    while(x){
+        str[i++]=(x%10)+'0';
+        x/=10;
+    }
+    while(i<d) str[i++]='0';
+	reverse(str, i);
+	str[i]='\0';
+    return i;
+}
+
+char *float2str(float depth, int afterpoint){
+    char *depthstr = (char*)calloc(32, sizeof(char));
+    int ipart = (int)depth;
+    float fpart = depth - (float)ipart;
+    int i = int2str(ipart, depthstr, 0);
+    if(afterpoint != 0){
+        depthstr[i] = '.';
+		fpart = fpart * pow(10, afterpoint);
+		int2str((int)fpart, depthstr+i+1, afterpoint);
+	}
+    return depthstr;
+}
+
+void write_detections(char *filename, detection *dets, int num, float thresh, char **names, int classes){
+    int i,j;
+	char outpath[4096]={0};
+	find_replace(filename, ".jpg", ".result", outpath);
+	find_replace(outpath, ".JPEG", ".result", outpath);
+	find_replace(outpath, ".JPG", ".result", outpath);
+	find_replace(outpath, ".png", ".result", outpath);
+	find_replace(outpath, ".PNG", ".result", outpath);
+	FILE *fp=fopen(outpath, "w+");// create and truncate
+	fclose(fp);
+
+    for(i = 0; i < num; ++i){
+        char labelstr[4096] = {0};
+        int class = -1;
+        for(j = 0; j < classes; ++j){
+            if (dets[i].prob[j] > thresh){
+                if (class < 0) {
+                    strcat(labelstr, names[j]);
+                    class = j;
+                } else {
+                    strcat(labelstr, ", ");
+                    strcat(labelstr, names[j]);
+                }
+                printf("%s: %.0f%% depth: %.5f\n", names[j], dets[i].prob[j]*100, dets[i].dep);
+            }
+        }
+        if(class >= 0){
+			//float dep=dets[i].dep;
+			float dep=-1;
+            box b = dets[i].bbox;
+
+			FILE *fp=fopen(outpath, "a");
+			if(fp==NULL){
+				fprintf(stderr, "Error writing.\n");
+				exit(1);
+			}
+			fprintf(fp, "%d %f %f %f %f %f\n", class, b.x, b.y, b.w, b.h, dep);
+			fclose(fp);
+        }
+    }
+}

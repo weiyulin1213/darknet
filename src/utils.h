@@ -48,6 +48,12 @@ float **one_hot_encode(float *a, int n, int k);
 float sec(clock_t clocks);
 void print_statistics(float *a, int n);
 int int_index(int *a, int val, int n);
+// self added
+char *float2str(float dep, int afterpoint);
+int int2str(int ipart, char *str, int d);
+void reverse(char *str, int len);
+void write_detections(char *filename, detection *dets, int num, float thresh, char **names, int classes);
+
 
 #endif
 

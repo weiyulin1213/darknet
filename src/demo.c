@@ -234,6 +234,19 @@ void demo(char *cfgfile, char *weightfile, float thresh, int cam_index, const ch
     buff_letter[2] = letterbox_image(buff[0], net->w, net->h);
     ipl = cvCreateImage(cvSize(buff[0].w,buff[0].h), IPL_DEPTH_8U, buff[0].c);
 
+	// write video out
+	CvVideoWriter *writer;
+	CvSize AviSize=cvSize(buff[0].w, buff[0].h);
+	char AviFileName[]="Output.avi";
+	int FSP=24;
+	int AviColor=1;
+	writer=cvCreateVideoWriter(AviFileName, CV_FOURCC('M', 'J', 'P', 'G'), FSP, AviSize, AviColor);
+	if(writer==NULL){
+		fprintf(stderr, "Failed to create video writer.\n");
+		exit(3);
+	}
+	else printf("Video writer success.\n");
+
     int count = 0;
     if(!prefix){
         cvNamedWindow("Demo", CV_WINDOW_NORMAL); 
@@ -255,6 +268,7 @@ void demo(char *cfgfile, char *weightfile, float thresh, int cam_index, const ch
             fps = 1./(what_time_is_it_now() - demo_time);
             demo_time = what_time_is_it_now();
             display_in_thread(0);
+			cvWriteFrame(writer, ipl);
         }else{
             char name[256];
             sprintf(name, "%s_%08d", prefix, count);

@@ -234,7 +234,7 @@ void update_network(network *netp)
 
     for(i = 0; i < net.n; ++i){
         layer l = net.layers[i];
-        if(l.update){
+        if(l.update && l.noupdate!=1){
             l.update(l, a);
         }
     }
@@ -511,7 +511,7 @@ int num_detections(network *net, float thresh)
 {
     int i;
     int s = 0;
-    for(i = 0; i < net->n; ++i){
+    for(i = 0; i < net->n; ++i){ // for EVERY layer in network.
         layer l = net->layers[i];
         if(l.type == YOLO){
             s += yolo_num_detections(l, thresh);
@@ -543,7 +543,7 @@ void fill_network_boxes(network *net, int w, int h, float thresh, float hier, in
 {
     int j;
     for(j = 0; j < net->n; ++j){
-        layer l = net->layers[j];
+        layer l = net->layers[j];// for EVERY layer in network, because we may have more than 1 "YOLO" detection layer, this is specifically for YOLOv3.
         if(l.type == YOLO){
             int count = get_yolo_detections(l, w, h, net->w, net->h, thresh, map, relative, dets);
             dets += count;
@@ -765,6 +765,7 @@ void forward_network_gpu(network *netp)
     cuda_set_device(net.gpu_index);
     cuda_push_array(net.input_gpu, net.input, net.inputs*net.batch);
     if(net.truth){
+		// put truth data to gpu memory
         cuda_push_array(net.truth_gpu, net.truth, net.truths*net.batch);
     }
 
@@ -829,7 +830,7 @@ void update_network_gpu(network *netp)
 
     for(i = 0; i < net.n; ++i){
         layer l = net.layers[i];
-        if(l.update_gpu){
+        if(l.update_gpu && l.noupdate!=1){
             l.update_gpu(l, a);
         }
     }

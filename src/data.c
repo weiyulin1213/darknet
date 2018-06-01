@@ -139,12 +139,12 @@ box_label *read_boxes(char *filename, int *n)
 {
     FILE *file = fopen(filename, "r");
     if(!file) file_error(filename);
-    float x, y, h, w;
+    float x, y, h, w, dep;
     int id;
     int count = 0;
     int size = 64;
     box_label *boxes = calloc(size, sizeof(box_label));
-    while(fscanf(file, "%d %f %f %f %f", &id, &x, &y, &w, &h) == 5){
+    while(fscanf(file, "%d %f %f %f %f %f", &id, &x, &y, &w, &h, &dep) == 6){
         if(count == size) {
             size = size * 2;
             boxes = realloc(boxes, size*sizeof(box_label));
@@ -154,12 +154,17 @@ box_label *read_boxes(char *filename, int *n)
         boxes[count].y = y;
         boxes[count].h = h;
         boxes[count].w = w;
+        boxes[count].dep = dep;
         boxes[count].left   = x - w/2;
         boxes[count].right  = x + w/2;
         boxes[count].top    = y - h/2;
         boxes[count].bottom = y + h/2;
         ++count;
     }
+	if(count==0){
+		printf("%s\n", filename);
+		exit(20);
+	}
     fclose(file);
     *n = count;
     return boxes;
@@ -411,9 +416,14 @@ void fill_truth_detection(char *path, int num_boxes, float *truth, int classes, 
     find_replace(path, "images", "labels", labelpath);
     find_replace(labelpath, "JPEGImages", "labels", labelpath);
 
-    find_replace(labelpath, "raw", "labels", labelpath);
+    //find_replace(labelpath, "raw", "labels", labelpath);
     find_replace(labelpath, ".jpg", ".txt", labelpath);
-    find_replace(labelpath, ".png", ".txt", labelpath);
+    //find_replace(labelpath, ".png", ".txt", labelpath);
+    //find_replace(labelpath, ".png", ".segtxtcoco", labelpath);
+    //find_replace(labelpath, ".png", ".seginstxtcoco", labelpath);
+    //find_replace(labelpath, ".png", ".segfixwhinstxtcoco", labelpath);
+    //find_replace(labelpath, ".png", ".segfixwhtxtcoco", labelpath);
+    find_replace(labelpath, ".png", ".txtcoco", labelpath);
     find_replace(labelpath, ".JPG", ".txt", labelpath);
     find_replace(labelpath, ".JPEG", ".txt", labelpath);
     int count = 0;
@@ -421,7 +431,7 @@ void fill_truth_detection(char *path, int num_boxes, float *truth, int classes, 
     randomize_boxes(boxes, count);
     correct_boxes(boxes, count, dx, dy, sx, sy, flip);
     if(count > num_boxes) count = num_boxes;
-    float x,y,w,h;
+    float x,y,w,h,dep;
     int id;
     int i;
     int sub = 0;
@@ -432,17 +442,19 @@ void fill_truth_detection(char *path, int num_boxes, float *truth, int classes, 
         w =  boxes[i].w;
         h =  boxes[i].h;
         id = boxes[i].id;
+		dep=boxes[i].dep;
 
         if ((w < .001 || h < .001)) {
             ++sub;
             continue;
         }
 
-        truth[(i-sub)*5+0] = x;
-        truth[(i-sub)*5+1] = y;
-        truth[(i-sub)*5+2] = w;
-        truth[(i-sub)*5+3] = h;
-        truth[(i-sub)*5+4] = id;
+        truth[(i-sub)*6+0] = x;
+        truth[(i-sub)*6+1] = y;
+        truth[(i-sub)*6+2] = w;
+        truth[(i-sub)*6+3] = h;
+        truth[(i-sub)*6+4] = id;
+        truth[(i-sub)*6+5] = dep;
     }
     free(boxes);
 }
@@ -965,7 +977,7 @@ data load_data_detection(int n, char **paths, int m, int w, int h, int boxes, in
     d.X.vals = calloc(d.X.rows, sizeof(float*));
     d.X.cols = h*w*3;
 
-    d.y = make_matrix(n, 5*boxes);
+    d.y = make_matrix(n, 6*boxes);
     for(i = 0; i < n; ++i){
         image orig = load_image_color(random_paths[i], 0, 0);
         image sized = make_image(w, h, orig.c);
